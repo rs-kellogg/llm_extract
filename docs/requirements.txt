@@ -1,0 +1,9 @@
+jupyter-book
+wrds
+pandas
+matplotlib
+seaborn
+R-DBI
+R-Rpostgres
+R-lubridate
+R-ggplot2
