@@ -1,0 +1,240 @@
+###############################
+# Enron Emails - Workshop Ex GPT 
+###############################
+# Lab 2 Answer
+
+# libraries
+import os
+import csv
+from openai import OpenAI 
+from pydantic import BaseModel, ValidationError
+from typing import List, Optional, Literal
+from pydantic import Field
+from datetime import datetime
+import pandas as pd
+import time
+import json
+
+
+#########
+# Inputs
+#########
+
+# API Token
+api_file = "/home/<your_net_id>/keys/api_key.txt"
+with open(api_file, 'r') as file:
+    api_key = file.read().strip()
+client = OpenAI(api_key=api_key)
+
+# settings
+model_select = 'gpt-4o' 
+temp_set = 0
+top_pset = 0.0
+seed_set = 42
+
+# Directories
+enron_data_dir = "/home/<your_net_id>/extract-book/data/enron_emails2/" 
+output_base_dir = "/home/<your_net_id>/extract-book/code/lab2/"
+
+os.makedirs(output_base_dir, exist_ok=True)
+
+results_track = os.path.join(output_base_dir, "enron_email_extractions.csv")
+
+
+#########
+# Prompts
+#########
+
+system_prompt_enron = """
+You are an expert forensic accountant and legal analyst specialized in corporate fraud,
+meticulously analyzing email content to extract key communication details and assess for suspicious activities.
+You must adhere strictly to the JSON schema provided.
+"""
+
+user_prompt_enron_extraction = """
+Task: Extract specific fields from the email provided below and assess whether it suggests any nefarious or illegal activity.
+
+**Fields to Extract:**
+1.  **To (to_recipients):** A list of all primary recipients in the 'To:' field.
+2.  **From (from_sender):** The sender's email address or name in the 'From:' field.
+3.  **Date (email_date):** The date the email was sent, in YYYY-MM-DD format. If only month/day/year is available, infer the exact date if possible.
+4.  **Subject (subject):** The subject line of the email.
+5.  **Nefarious/Illegal Activity (nefarious_activity_flag):**
+    * **"yes"**: If the email explicitly discusses or strongly implies illegal activities (e.g., market manipulation, accounting fraud, evidence destruction, collusion, bribery, insider trading).
+    * **"no"**: If the email is clearly mundane, administrative, personal, or completely unrelated to any suspicious activity (e.g., discussing lunch plans, a vacation, or a pet's antics).
+    * **"uncertain"**: If the email contains ambiguous language, jargon, or coded messages that *could* hint at something nefarious but is not explicit enough for a "yes" or "no" determination.
+6.  **Justification for Nefarious Activity Assessment (justification_text):**
+    * Provide a concise quote or a summary of specific text segments from the email that directly support your 'nefarious_activity_flag' assessment.
+    * If the flag is "no", state why it's clearly innocent (e.g., "Email discusses team picnic arrangements.").
+    * If "uncertain", explain the ambiguity (e.g., "Uses vague terms like 'restructuring assets' without further context.").
+    * If "yes", point to the specific phrases or implied actions (e.g., "Explicit mention of 'moving liabilities off-book'.").
+
+**Output Structure:**
+Your response must be a JSON object conforming to the provided schema.
+
+Here is the email content to analyze:
+"""
+
+
+#########
+# Schema
+#########
+# New Schema for a single object with two fields
+class EmailExtraction(BaseModel):
+    to_recipients: List[str] = Field(description="List of primary recipients in the 'To:' field.")
+    from_sender: str = Field(description="Sender's email address or name from the 'From:' field.")
+    email_date: Optional[str] = Field(None, description="Date the email was sent, in YYYY-MM-DD format.")
+    subject: str = Field(description="Subject line of the email.")
+    nefarious_activity_flag: Literal["yes", "no", "uncertain"] = Field(
+        description="Assessment of whether the email discusses or implies nefarious or illegal activity."
+    )
+    justification_text: str = Field(
+        description="Specific text or summary from the email that justifies the nefarious activity assessment."
+    )
+
+
+#########
+# Functions
+#########
+
+def get_content(file_path: str) -> Optional[str]:
+    try:
+        with open(file_path, 'r', encoding='utf-8') as f:
+            return f.read()
+    except Exception as e:
+        print(f"Error reading file {file_path}: {e}")
+        return None
+
+def call_gpt(user_prompt, system_prompt, schema, model_select, temperature, top_p, seed_value):
+    try:
+        response = client.beta.chat.completions.parse( 
+            model=model_select,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt} 
+            ],
+            temperature=temperature, 
+            top_p=top_p,             
+            response_format=schema, 
+            seed=seed_value         
+        )
+        
+        return response.choices[0].message.content
+
+    except Exception as e:
+        print(f"Error calling OpenAI API with get_response: {e}")
+        return None
+
+def init_tracker(csv_path):
+    os.makedirs(os.path.dirname(csv_path), exist_ok=True)
+    if not os.path.exists(csv_path):
+        with open(csv_path, mode='w', newline='') as file:
+            writer = csv.writer(file)
+            # Updated header to include the two response fields
+            writer.writerow(["timestamp", "prompt", "model", "temperature", "top_p", "to_recipients", "from_sender", "email_date", "subject", "nefarious_activity_flag", "justification_text"])
+        # Create the tracker file with the correct header
+        print(f"Created new tracker at {csv_path}")
+
+# Append results to tracker
+def log_response(csv_path, prompt, model, temperature, top_p, to_recipients, from_sender, email_date, subject, nefarious_activity_flag, justification_text):
+    now = datetime.now().isoformat()
+    with open(csv_path, mode='a', newline='') as file:
+        writer = csv.writer(file)
+        writer.writerow([now, prompt, model, temperature, top_p, 
+                         to_recipients, from_sender, email_date, subject, 
+                         nefarious_activity_flag, justification_text])
+
+# Run all prompts
+def run_prompt(prompt, system_prompt, model_select, temperature, top_p, seed_value, response_schema, csv_path):
+    print(f"Processing prompt: {prompt[:100]}...") # Print first 100 chars to avoid very long print
+
+    raw_json_response = call_gpt(prompt, system_prompt, response_schema, model_select, temperature, top_p, seed_value)
+    
+    # Initialize variables for logging with default values
+    to_recipients = []
+    from_sender = ""
+    email_date = None # Consider using datetime.date or str depending on schema
+    subject = ""
+    nefarious_activity_flag = ""
+    justification_text = ""
+
+    if raw_json_response:
+        try:
+            # Use the provided schema to parse and validate the JSON response
+            parsed_data = response_schema.model_validate_json(raw_json_response)
+            
+            # Extract fields from the parsed data
+            to_recipients = parsed_data.to_recipients
+            from_sender = parsed_data.from_sender
+            email_date = parsed_data.email_date
+            subject = parsed_data.subject
+            nefarious_activity_flag = parsed_data.nefarious_activity_flag
+            justification_text = parsed_data.justification_text
+            
+        except ValidationError as e:
+            print(f"Schema validation error for prompt (excerpt: '{prompt[:50]}...'): {e}")
+            print(f"Raw JSON response: {raw_json_response}")
+        except json.JSONDecodeError as e:
+            print(f"JSON decoding error for prompt (excerpt: '{prompt[:50]}...'): {e}")
+            print(f"Raw response: {raw_json_response}")
+        except Exception as e:
+            print(f"An unexpected error occurred during parsing for prompt (excerpt: '{prompt[:50]}...'): {e}")
+            print(f"Raw response: {raw_json_response}")
+    else:
+        print(f"No response or error from call_gpt for prompt (excerpt: '{prompt[:50]}...').")
+
+    # Pass the extracted fields to log_response
+    # Note: ensure log_response handles potential empty or default values if parsing failed
+    log_response(
+        csv_path, prompt, model_select, temperature, top_p,
+        to_recipients, from_sender, email_date, subject,
+        nefarious_activity_flag, justification_text
+    )
+
+def _is_ascii_text_file(filepath: str) -> bool:
+    try:
+        with open(filepath, 'r', encoding='ascii') as f:
+            f.read() # Attempt to read the entire file
+        return True
+    except (UnicodeDecodeError, Exception):
+        # If decoding fails or any other error occurs, it's not a pure ASCII text file
+        return False
+
+def find_all_ascii_text_files_minimal(search_directory: str) -> List[str]:
+    if not os.path.isdir(search_directory):
+        print(f"Error: Directory not found at '{search_directory}'")
+        return []
+
+    return [
+        os.path.join(root, file_name)
+        for root, _, files in os.walk(search_directory)
+        for file_name in files
+        if _is_ascii_text_file(os.path.join(root, file_name)) # Filter using the external helper
+    ]
+
+
+
+#########
+# Run
+#########
+
+def main():
+    email_list = find_all_ascii_text_files_minimal(enron_data_dir)
+
+    # limit to first 5 emails for testing
+    email_list = email_list[:5]
+    print("I obtained a list of emails to process.")
+    init_tracker(results_track)
+
+    for email_file in email_list:
+        email_content = get_content(email_file)
+        if email_content:
+            # Prepare the prompt
+            user_prompt = f"{user_prompt_enron_extraction}\n\n{email_content}"
+            # Run the prompt
+            run_prompt(user_prompt, system_prompt_enron, model_select, temp_set, top_pset, seed_set, EmailExtraction, results_track)
+        else:
+            print(f"Skipping file {email_file} due to read error or empty content.")
+
+if __name__ == "__main__":
+    main()
