@@ -44,26 +44,28 @@ results_track = os.path.join(output_base_dir, "enron_email_extractions.csv")
 # Prompts
 #########
 
-user_prompt_protest_violence_detection = """
-Task: Analyze the provided image of protest activity to determine if violence or violent activities are occurring.
+user_prompt_enron_extraction = """
+Task: Extract specific fields from the email provided below and assess whether it suggests any nefarious or illegal activity.
 
 **Fields to Extract:**
-1.  **Image Description (image_description):**
-    * A concise phrase (typically 2-5 words) summarizing the most prominent action or subject depicted in the image.
-    * Examples: "Crowd marching with signs", "Police engaging protesters", "Vehicle on fire during protest".
-2.  **Violence (violence):**
-    * **"yes"**: If the image clearly depicts physical aggression (e.g., fighting, throwing projectiles, assaults, use of weapons), active destruction of property (e.g., smashing, burning, vandalism), or direct, forceful clashes between groups or individuals.
-    * **"no"**: If the image shows only peaceful demonstrations, orderly gatherings, or passive resistance without any visible acts of physical harm, aggression, or property destruction.
-3.  **Justification for Violence Assessment (justification_text):**
-    * Provide specific, observable visual cues and details from the image that directly support your 'violence' assessment.
-    * If "yes", describe the visible violent acts or property damage (e.g., "Protesters throwing bottles at police line," "A storefront window is shattered," "Smoke rising from a burning car," "Physical altercation between two individuals").
-    * If "no", explain what makes the scene appear peaceful (e.g., "Participants are holding banners and chanting peacefully," "No signs of aggression or damage," "People are sitting calmly in protest").
+1.  **To (to_recipients):** A list of all primary recipients in the 'To:' field.
+2.  **From (from_sender):** The sender's email address or name in the 'From:' field.
+3.  **Date (email_date):** The date the email was sent, in YYYY-MM-DD format. If only month/day/year is available, infer the exact date if possible.
+4.  **Subject (subject):** The subject line of the email.
+5.  **Nefarious/Illegal Activity (nefarious_activity_flag):**
+    * **"yes"**: If the email explicitly discusses or strongly implies illegal activities (e.g., market manipulation, accounting fraud, evidence destruction, collusion, bribery, insider trading).
+    * **"no"**: If the email is clearly mundane, administrative, personal, or completely unrelated to any suspicious activity (e.g., discussing lunch plans, a vacation, or a pet's antics).
+    * **"uncertain"**: If the email contains ambiguous language, jargon, or coded messages that *could* hint at something nefarious but is not explicit enough for a "yes" or "no" determination.
+6.  **Justification for Nefarious Activity Assessment (justification_text):**
+    * Provide a concise quote or a summary of specific text segments from the email that directly support your 'nefarious_activity_flag' assessment.
+    * If the flag is "no", state why it's clearly innocent (e.g., "Email discusses team picnic arrangements.").
+    * If "uncertain", explain the ambiguity (e.g., "Uses vague terms like 'restructuring assets' without further context.").
+    * If "yes", point to the specific phrases or implied actions (e.g., "Explicit mention of 'moving liabilities off-book'.").
 
 **Output Structure:**
 Your response must be a JSON object conforming to the provided schema.
 
-Here is the image content to analyze:
-(Note: The image content itself will be provided directly to the multimodal model API alongside this text prompt.)
+Here is the email content to analyze:
 """
 
 
