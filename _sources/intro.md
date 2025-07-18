@@ -7,8 +7,6 @@ We'll cover:
 
 - (1) What LLMs are and when we use them
 - (2) The Anatomy of an API call
-  - Gemini
-  - OpenAI
 - (3) Setting up your code on KLC
 - (4) Crafting Prompts to improve Reproducibility
 
